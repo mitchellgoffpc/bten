@@ -5,6 +5,10 @@
 #include "shape.cpp"
 #include "buffer.cpp"
 
+// Seed the RNG
+std::random_device rd;
+std::mt19937 gen(rd());
+
 
 // Tensor class
 
@@ -55,6 +59,47 @@ public:
         this->buffer.reset(); }
 
 
+    // Static methods
+
+    // Tensor::random
+    static T random (T low, T high) {
+        return std::uniform_int_distribution<T>(low, high)(gen); }
+    static T random () {
+        return random(std::numeric_limits<T>::min(), std::numeric_limits<T>::max()); }
+
+    static Tensor<T> random (T low, T high, Shape shape) {
+        let dist = std::uniform_int_distribution<T>(low, high);
+        let outputSize = shape.volume();
+        T* data = new T[outputSize];
+        for (int i = 0; i < outputSize; i++) data[i] = dist(gen);
+        return Tensor(outputSize, data, shape); }
+    static Tensor<T> random (Shape shape) {
+        return random(std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), shape); }
+
+    // Tensor::normal
+    static T normal (T mean, T std) {
+        return std::normal_distribution<T>(mean, std)(gen); }
+    static T normal () { return normal(0, 1); }
+
+    static Tensor<T> normal (T mean, T std, Shape shape) {
+        let dist = std::normal_distribution<T>(mean, std);
+        let outputSize = shape.volume();
+        T* data = new T[outputSize];
+        for (int i = 0; i < outputSize; i++) data[i] = dist(gen);
+        return Tensor(outputSize, data, shape); }
+    static Tensor<T> normal (Shape shape) { return normal(0, 1, shape); }
+
+    // Tensor::constant
+    static Tensor<T> constant (T value, Shape shape) {
+        let outputSize = shape.volume();
+        T* data = new T[outputSize];
+        std::fill_n(data, outputSize, value);
+        return Tensor<T>(outputSize, data, shape); }
+
+    static Tensor<T> zeros (Shape shape) { return constant(0, shape); }
+    static Tensor<T> ones  (Shape shape) { return constant(1, shape); }
+
+
     // We have a bunch of tensor operations to define, and since they all share
     // a significant percentage of their structure, we'll define them as macros
     // and then expand them into the correct methods. These operations basically
@@ -67,7 +112,7 @@ public:
     returnType methodName () {                                                  \
         size_t startIndex = 0;                                                  \
         returnType result = initialValue;                                       \
-        for (int i = 0; i < this->buffer->length; i++)                           \
+        for (int i = 0; i < this->buffer->length; i++)                          \
             reduction;                                                          \
         return resultValue; }
 
@@ -138,8 +183,71 @@ public:
     // Helper methods
 
     String toString () const {
-        return "Tensor { data=[" + this->buffer->toString() + "], shape=" + this->shape.toString() + " }"; }
+        if (!this->shape.length)
+            return "Tensor { " + std::to_string(this->at(0)) + " }";
 
+        size_t offset = 0, length = this->shape.length - 1;
+        Shape position = Shape(length, new int[length] { 0 });
+        String result = "Tensor {";
+
+        // This method is a bit of a doozy. We need to stringify one column at a time,
+        // and we probably want to avoid recursing over the dimensions for performance
+        // reasons, so we'll perform the iteration in a single pass, tracking both the
+        // current position and current buffer offset independently. (Note: we might be
+        // able to get away with tracking only the offset, and just computing the relevant
+        // dimensional positions at each step, but for simplicitiy it's easiest to just
+        // track them both.) The inner for-loops are just for handling indentations and
+        // opening/closing brackets.
+
+        while (position[0] < this->shape[0]) {
+            result += "\n  ";
+
+            // Render the opening brackets
+            int overflowIndex = length - 1;
+            for (; overflowIndex >= 0 && position[overflowIndex] == 0; overflowIndex--);
+            for (int i = 0; i < length; i++)
+                result += i <= overflowIndex ? " " : "[";
+
+            // Render the current column, and then update the offset and position
+            result += this->columnToString(offset);
+            offset += this->stride[length - 1];
+            position[-1] += 1;
+
+            // Render the closing brackets, and carry any overflows in the position
+            // over to the next dimension. For example, if `this->shape` is [2, 3, 4] and
+            // `position` is [0, 2, 4], we should handle the overflow by updating `position`
+            // to [1, 0, 0].
+            int i = length - 1;
+            for (; i > 0 && position[i] >= this->shape[i]; i--) {
+                result += "]";
+                offset -= this->stride[i] * this->shape[i];
+                position[i] = 0;
+                if (i > 0) {
+                    offset += this->stride[i];
+                    position[i - 1] += 1; }}
+
+            // Render the comma after each line, plus any required newlines for
+            // separation between elements in higher dimensions
+            if (position[0] < this->shape[0]) {
+                result += ',';
+                for (; i < length - 1; i++)
+                    result += '\n'; }}
+
+        result += "]\n}";
+        return result; }
+
+    String columnToString (size_t offset) const {
+        int length = this->shape[-1];
+        int stride = this->stride[-1];
+        T* values = new T[length];
+        for (int i = 0; i < length; i++)
+            values[i] = this->at(offset + i * stride);
+        String result = join(length, values);
+        delete[] values;
+        return "[" + result + "]"; }
+
+    // Helper method to get element `i` from this tensor's buffer. Useful
+    // because `shared_ptr` doesn't support the [] operator.
     T& at (size_t i) const {
         return (*this->buffer)[i]; }
 
@@ -197,6 +305,33 @@ public:
 template <typename T> std::ostream& operator<< (std::ostream& os, const Tensor<T>& tensor) {
     os << tensor.toString();
     return os; }
+
+// Template specializations for the Tensor::random method. Putting this in a
+// macro probably violates Fowler's rule of three, but I didn't really want
+// to write out all the definitions twice to handle both doubles and floats.
+
+#define randomSpecialization(T)                                                 \
+template<> T Tensor<T>::random (T low, T high) {                                \
+    return std::uniform_real_distribution<T>(low, high)(gen); }                 \
+template<> T Tensor<T>::random () {                                             \
+    return Tensor<T>::random(0, 1); }                                           \
+                                                                                \
+template<> Tensor<T> Tensor<T>::random (T low, T high, Shape shape) {           \
+    let dist = std::uniform_real_distribution<T>(low, high);                    \
+    let outputSize = shape.volume();                                            \
+    T* data = new T[outputSize];                                                \
+                                                                                \
+    for (int i = 0; i < outputSize; i++)                                        \
+        data[i] = dist(gen);                                                    \
+                                                                                \
+    return Tensor<T>(outputSize, data, shape); }                                \
+                                                                                \
+template<> Tensor<T> Tensor<T>::random (Shape shape) {                          \
+    return Tensor<T>::random(0, 1, shape); }
+
+// Expand the macro for both floats and doubles
+randomSpecialization(float);
+randomSpecialization(double);
 
 
 #endif

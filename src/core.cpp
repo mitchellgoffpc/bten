@@ -1,6 +1,8 @@
 #ifndef __CORE__
 #define __CORE__
 
+#include <limits>
+#include <random>
 #include <string>
 #include <vector>
 #include <iostream>
@@ -85,9 +87,9 @@ template <> String join(List<String> input) {
     return join(input, ","); }
 
 template <typename T> String join(int length, T* input, String delimiter) {
-    return join(map(input, length, std::to_string), delimiter); }
+    return join(map(length, input, (String (*)(T)) std::to_string), delimiter); }
 template <typename T> String join(int length, T* input) {
-    return join(map(input, length, std::to_string)); }
+    return join(map(length, input, (String (*)(T)) std::to_string)); }
 
 
 #endif

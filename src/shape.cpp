@@ -74,6 +74,7 @@ struct Shape {
         return *this; }
 
     int& operator[] (int i) const {
+        if (i < 0) i = this->length + i;
         if (i < 0 || i >= this->length)
              throw "Shape[] - Index out of range";
         else return this->dimensions[i]; }

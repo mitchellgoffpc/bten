@@ -58,7 +58,7 @@ public:
 
     T& operator[] (int i) const {
         if (i < 0 || i >= this->length)
-             throw "Invalid index";
+             throw "Buffer[] - Invalid index";
         else return this->data[i]; }};
 
 
